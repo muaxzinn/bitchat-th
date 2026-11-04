@@ -129,6 +129,22 @@ public struct DisasterTriageCardView: View {
                 .cornerRadius(6)
             }
             
+            // House Address
+            if !report.houseAddress.isEmpty {
+                HStack(spacing: 5) {
+                    Image(systemName: "house.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.blue)
+                    Text("ที่อยู่: \(report.houseAddress)")
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.secondary.opacity(0.08))
+                .cornerRadius(6)
+            }
+            
             // GPS Satellite Coordinates & Officer Relative Vector
             if let lat = report.latitude, let lon = report.longitude {
                 VStack(alignment: .leading, spacing: 6) {
@@ -311,32 +327,15 @@ public struct DisasterTriageCardView: View {
                                                 .cornerRadius(3)
                                         }
                                         
-                                        // Thai National Citizen ID with 1-Tap Copy
+                                        // Thai National Citizen ID (Protected Masked Display)
                                         if !victim.citizenID.isEmpty {
-                                            HStack(spacing: 6) {
-                                                Text("เลข ปชช: \(victim.formattedCitizenID)")
+                                            HStack(spacing: 5) {
+                                                Image(systemName: "lock.shield.fill")
+                                                    .font(.system(size: 10))
+                                                    .foregroundColor(.secondary)
+                                                Text("เลข ปชช: \(victim.maskedCitizenID)")
                                                     .font(.system(size: 11, design: .monospaced))
                                                     .foregroundColor(.secondary)
-                                                
-                                                Button(action: {
-                                                    let cleanID = victim.citizenID.filter { $0.isNumber }
-                                                    copyToClipboard(cleanID)
-                                                    copiedCitizenID = victim.id
-                                                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                                                        if copiedCitizenID == victim.id {
-                                                            copiedCitizenID = nil
-                                                        }
-                                                    }
-                                                }) {
-                                                    HStack(spacing: 2) {
-                                                        Image(systemName: copiedCitizenID == victim.id ? "checkmark" : "doc.on.doc")
-                                                            .font(.system(size: 9))
-                                                        Text(copiedCitizenID == victim.id ? "คัดลอกแล้ว" : "คัดลอก")
-                                                            .font(.system(size: 9, weight: .medium))
-                                                    }
-                                                    .foregroundColor(.blue)
-                                                }
-                                                .buttonStyle(.plain)
                                                 
                                                 if victim.isCitizenIDValid {
                                                     Image(systemName: "checkmark.seal.fill")

@@ -53,8 +53,9 @@ final class DisasterTriageTests: XCTestCase {
         
         let encodedWire = DisasterTriageCodec.encode(originalReport)
         XCTAssertTrue(DisasterTriageCodec.isDisasterReport(encodedWire))
-        // Verify pure compact code wire format (Zero verbose sentences)
-        XCTAssertTrue(encodedWire.hasPrefix("SOS#SOS-FRW6-RED-P2M#TH-SOS-V1:"))
+        // Verify pure compact code wire format without redundant SOS (Zero verbose sentences)
+        XCTAssertTrue(encodedWire.hasPrefix("FRW6SR-RED-P2M-BOAT-W1F1#TH-V1:"))
+        XCTAssertFalse(encodedWire.contains("SOS"))
         XCTAssertFalse(encodedWire.contains("📍 ตำแหน่ง:"))
         XCTAssertFalse(encodedWire.contains("👥 ผู้ประสบภัย:"))
         
@@ -85,8 +86,17 @@ final class DisasterTriageTests: XCTestCase {
             ]
         )
         
-        // F2 + W3 + RED (Score 7.0) + P2 + CE (Child & Elderly)
-        XCTAssertEqual(report.universalShortCode, "SOS-F2W3-RED-P2CE")
+        // F2 + W3 + SR (Slowly Rising) + RED (Score 7.0) + P2CE + BOAT + W1F1
+        XCTAssertEqual(report.universalShortCode, "F2W3SR-RED-P2CE-BOAT-W1F1")
+        XCTAssertFalse(report.universalShortCode.contains("SOS"))
+    }
+    
+    func testMaskedCitizenID() {
+        let validID = "1100500123456"
+        let victim = VictimRecord(fullName: "สมชาย", citizenID: validID)
+        // Masks middle 7 digits: 1-1005-•••••-••-6
+        XCTAssertEqual(victim.maskedCitizenID, "1-1005-•••••-••-6")
+        XCTAssertFalse(victim.maskedCitizenID.contains("12345"))
     }
     
     // MARK: - Distance Calculation & Officer Filtering Tests

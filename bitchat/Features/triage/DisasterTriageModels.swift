@@ -492,23 +492,39 @@ public struct VictimRecord: Identifiable, Codable, Equatable {
     public var citizenID: String
     public var category: VictimCategory
     public var medicalNotes: String
+    public var address: String
+    public var isHeadOfHousehold: Bool
     
     public init(
         id: String = UUID().uuidString.prefix(6).uppercased(),
         fullName: String = "",
         citizenID: String = "",
         category: VictimCategory = .adult,
-        medicalNotes: String = ""
+        medicalNotes: String = "",
+        address: String = "",
+        isHeadOfHousehold: Bool = false
     ) {
         self.id = id
         self.fullName = fullName
         self.citizenID = citizenID
         self.category = category
         self.medicalNotes = medicalNotes
+        self.address = address
+        self.isHeadOfHousehold = isHeadOfHousehold
     }
     
     public var formattedCitizenID: String {
         ThaiCitizenIDValidator.format(citizenID)
+    }
+    
+    /// Protected masked Citizen ID (e.g. "1-1005-•••••-••-6") to preserve privacy and prevent identity theft
+    public var maskedCitizenID: String {
+        let digits = citizenID.filter { $0.isNumber }
+        guard digits.count == 13 else {
+            return citizenID.isEmpty ? "ไม่ระบุ" : "•••••••••••••"
+        }
+        let chars = Array(digits)
+        return "\(chars[0])-\(chars[1])\(chars[2])\(chars[3])\(chars[4])-•••••-••-\(chars[12])"
     }
     
     public var isCitizenIDValid: Bool {
@@ -534,6 +550,7 @@ public struct DisasterTriageReport: Identifiable, Codable, Equatable {
     public var supplies: [SupplyNeed]
     public var victims: [VictimRecord]
     public var totalPeopleCount: Int
+    public var houseAddress: String
     public var additionalNotes: String
     public var districtName: String
     public var geohash: String
@@ -557,6 +574,7 @@ public struct DisasterTriageReport: Identifiable, Codable, Equatable {
         supplies: [SupplyNeed] = [.water, .food],
         victims: [VictimRecord] = [],
         totalPeopleCount: Int = 1,
+        houseAddress: String = "",
         additionalNotes: String = "",
         districtName: String = "อำเภอเมือง",
         geohash: String = "",
@@ -579,6 +597,7 @@ public struct DisasterTriageReport: Identifiable, Codable, Equatable {
         self.supplies = supplies
         self.victims = victims
         self.totalPeopleCount = max(totalPeopleCount, max(victims.count, 1))
+        self.houseAddress = houseAddress
         self.additionalNotes = additionalNotes
         self.districtName = districtName
         self.geohash = geohash
@@ -640,20 +659,69 @@ public struct DisasterTriageReport: Identifiable, Codable, Equatable {
         }
     }
     
-    /// Universal Alphanumeric Shortcode
-    /// e.g. `SOS-FRW4-RED-P4BEM`
+    /// Ultra-Granular Alphanumeric Triage Code without redundant "SOS" prefix.
+    /// Format: [Floor + Water + Trend + Threats]-[Urgency]-[People + Vulnerabilities]-[Request]-[Supplies]
+    /// e.g. "F2W3SR-RED-P3EMO-BOAT-W0F0" or "FRW6RR+EL-RED-P4BEM-BOAT-W0F0"
     public var universalShortCode: String {
         let floorCode = floorPosition.shortCode
         let waterCode = waterLevel.shortCode.replacingOccurrences(of: "L", with: "")
+        
+        let trendCode: String = {
+            switch waterTrend {
+            case .rapidRising: return "RR"
+            case .slowlyRising: return "SR"
+            case .stable: return "ST"
+            case .receding: return "RC"
+            }
+        }()
+        
+        var threatStr = ""
+        if !environmentalThreats.isEmpty {
+            let threatCodes = environmentalThreats.compactMap { threat -> String? in
+                switch threat {
+                case .electricityLeak: return "EL"
+                case .landslide: return "LS"
+                case .gasLeak: return "GS"
+                case .venomousAnimals: return "SN"
+                case .buildingCracking: return "CR"
+                case .trappedNoExit: return "TR"
+                }
+            }
+            if !threatCodes.isEmpty {
+                threatStr = "+" + threatCodes.joined(separator: "")
+            }
+        }
+        
         let urgencyCode = resolvedUrgency.shortCode
         let count = max(totalPeopleCount, max(victims.count, 1))
         
         var flagStr = ""
-        for flag in vulnerabilityFlags.prefix(4) {
+        for flag in vulnerabilityFlags.prefix(5) {
             flagStr += flag.shortCode
         }
         
-        return "SOS-\(floorCode)\(waterCode)-\(urgencyCode)-P\(count)\(flagStr)"
+        let reqCode = primaryRequest.shortCode
+        
+        var shortageStr = ""
+        if waterSupply == .none { shortageStr += "W0" }
+        else if waterSupply == .lessThan1Day { shortageStr += "W1" }
+        
+        if foodSupply == .none { shortageStr += "F0" }
+        else if foodSupply == .oneToTwoMeals { shortageStr += "F1" }
+        
+        if batteryStatus == .critical { shortageStr += "B0" }
+        
+        var components = [
+            "\(floorCode)\(waterCode)\(trendCode)\(threatStr)",
+            urgencyCode,
+            "P\(count)\(flagStr)",
+            reqCode
+        ]
+        if !shortageStr.isEmpty {
+            components.append(shortageStr)
+        }
+        
+        return components.joined(separator: "-")
     }
     
     public var victimSummaryDescription: String {

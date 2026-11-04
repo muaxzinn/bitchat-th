@@ -43,6 +43,13 @@ public struct DisasterBeaconMainView: View {
     @State private var additionalNotes: String = ""
     private let maxLandmarkLength = 40
     
+    // Primary Household Contact (Mandatory: Name + House Address)
+    @State private var primaryVictimName: String = ""
+    @State private var houseAddress: String = ""
+    @State private var primaryCitizenID: String = ""
+    @State private var showNameRequiredAlert = false
+    @State private var showAddressRequiredAlert = false
+    
     // Officer Radar Filters
     @State private var officerRangeFilter: OfficerRangeFilter = .all
     @State private var officerSortOrder: OfficerSortOrder = .urgencyFirst
@@ -74,6 +81,21 @@ public struct DisasterBeaconMainView: View {
     }
     
     private var currentReport: DisasterTriageReport {
+        var allVictims = victims
+        let trimmedName = primaryVictimName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedName.isEmpty {
+            let primary = VictimRecord(
+                id: "HEAD",
+                fullName: trimmedName,
+                citizenID: primaryCitizenID,
+                category: .adult,
+                medicalNotes: "",
+                address: houseAddress,
+                isHeadOfHousehold: true
+            )
+            allVictims.insert(primary, at: 0)
+        }
+        
         var report = DisasterTriageReport(
             id: Self.deviceBeaconID,
             timestamp: Date(),
@@ -87,8 +109,9 @@ public struct DisasterBeaconMainView: View {
             batteryStatus: batteryStatus,
             primaryRequest: primaryRequest,
             supplies: [.water, .food],
-            victims: victims,
-            totalPeopleCount: totalPeople,
+            victims: allVictims,
+            totalPeopleCount: max(totalPeople, max(1, allVictims.count)),
+            houseAddress: houseAddress,
             additionalNotes: additionalNotes,
             districtName: "อำเภอเมือง",
             latitude: gpsManager.latitude,
@@ -216,24 +239,86 @@ public struct DisasterBeaconMainView: View {
                 .background(Color.secondary.opacity(0.06))
                 .cornerRadius(12)
                 
-                // Group 2: Population & Vulnerabilities
-                VStack(alignment: .leading, spacing: 10) {
-                    sectionHeader(title: "2. การคัดกรองประชากรและกลุ่มเปราะบาง", icon: "person.2.fill")
+                // Group 2: Victims, House Address & Vulnerabilities (Unified Section)
+                VStack(alignment: .leading, spacing: 12) {
+                    sectionHeader(title: "2. ข้อมูลผู้ประสบภัย, ที่อยู่บ้าน และกลุ่มเปราะบาง", icon: "person.2.fill")
                     
+                    // 2.1 Primary Household Contact (Mandatory: Name + House Address)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("ผู้แจ้งเหตุ / ตัวแทนบ้าน (จำเป็นอย่างน้อย 1 คน):")
+                                .font(.system(size: 12, weight: .bold))
+                                .foregroundColor(.primary)
+                            Spacer()
+                            Text("* บังคับกรอก")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.red)
+                        }
+                        
+                        TextField("ชื่อ-นามสกุล เช่น นายสมชาย ใจดี", text: $primaryVictimName)
+                            .textFieldStyle(.roundedBorder)
+                        
+                        TextField("บ้านเลขที่ / ที่อยู่ เช่น 45/2 ม.3 ซอยเทศบาล 4", text: $houseAddress)
+                            .textFieldStyle(.roundedBorder)
+                        
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                TextField("เลขบัตร ปชช 13 หลัก (ไม่บังคับ)", text: $primaryCitizenID)
+                                    .textFieldStyle(.roundedBorder)
+                                    .onChange(of: primaryCitizenID) { newValue in
+                                        let formatted = ThaiCitizenIDValidator.format(newValue)
+                                        if formatted != newValue {
+                                            primaryCitizenID = formatted
+                                        }
+                                    }
+                                
+                                if ThaiCitizenIDValidator.isValid(primaryCitizenID) {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "checkmark.seal.fill")
+                                        Text("ถูกต้อง")
+                                    }
+                                    .font(.system(size: 11, weight: .bold))
+                                    .foregroundColor(.green)
+                                } else if !primaryCitizenID.isEmpty {
+                                    HStack(spacing: 3) {
+                                        Image(systemName: "exclamationmark.triangle.fill")
+                                        Text("เลขไม่ครบ")
+                                    }
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(.orange)
+                                }
+                            }
+                            
+                            HStack(spacing: 4) {
+                                Image(systemName: "lock.shield.fill")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                                Text("ข้อมูลเลขบัตรจะถูกปกปิด (Masked) เพื่อความปลอดภัย ไม่เปิดเผยสาธารณะ")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+                    .padding(10)
+                    .background(Color.secondary.opacity(0.06))
+                    .cornerRadius(8)
+                    
+                    // 2.2 Total Victim Stepper
                     HStack {
-                        Text("จำนวนผู้ประสบภัยทั้งหมด:")
+                        Text("จำนวนผู้ประสบภัยรวมในบ้าน:")
                             .font(.system(size: 13, weight: .semibold))
                         Spacer()
                         HStack(spacing: 12) {
-                            Button(action: { if totalPeople > 1 { totalPeople -= 1 } }) {
+                            Button(action: { if totalPeople > max(1, victims.count + 1) { totalPeople -= 1 } }) {
                                 Image(systemName: "minus.circle.fill")
                                     .font(.system(size: 22))
                                     .foregroundColor(.secondary)
                             }
                             .buttonStyle(.plain)
                             
-                            Text("\(totalPeople) คน")
-                                .font(.system(size: 16, weight: .bold, design: .monospaced))
+                            let displayCount = max(totalPeople, victims.count + (primaryVictimName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? 0 : 1))
+                            Text("\(displayCount) คน")
+                                .font(.system(size: 15, weight: .bold, design: .monospaced))
                             
                             Button(action: { totalPeople += 1 }) {
                                 Image(systemName: "plus.circle.fill")
@@ -243,8 +328,61 @@ public struct DisasterBeaconMainView: View {
                             .buttonStyle(.plain)
                         }
                     }
-                    .padding(.vertical, 4)
                     
+                    // 2.3 Additional Household Members (If any)
+                    if !victims.isEmpty {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("สมาชิกเพิ่มเติมในบ้าน:")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.secondary)
+                            
+                            ForEach(victims) { victim in
+                                HStack(spacing: 8) {
+                                    Image(systemName: victim.category.systemIcon)
+                                        .foregroundColor(.blue)
+                                        .font(.system(size: 12))
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(victim.fullName.isEmpty ? "สมาชิกในบ้าน" : victim.fullName)
+                                            .font(.system(size: 12, weight: .semibold))
+                                        if !victim.citizenID.isEmpty {
+                                            HStack(spacing: 4) {
+                                                Image(systemName: "lock.shield.fill")
+                                                    .font(.system(size: 9))
+                                                Text("เลข ปชช: \(victim.maskedCitizenID)")
+                                                    .font(.system(size: 10, design: .monospaced))
+                                            }
+                                            .foregroundColor(.secondary)
+                                        }
+                                    }
+                                    Spacer()
+                                    Button(action: { victims.removeAll { $0.id == victim.id } }) {
+                                        Image(systemName: "trash")
+                                            .font(.system(size: 11))
+                                            .foregroundColor(.red)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                .padding(6)
+                                .background(Color.secondary.opacity(0.06))
+                                .cornerRadius(6)
+                            }
+                        }
+                    }
+                    
+                    Button(action: { showAddPersonDialog = true }) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "plus.circle.fill")
+                            Text("เพิ่มสมาชิกในบ้าน / ผู้ป่วย / เด็ก / คนชรา")
+                                .font(.system(size: 12, weight: .semibold))
+                        }
+                        .foregroundColor(.blue)
+                        .padding(.vertical, 3)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Divider()
+                    
+                    // 2.4 Vulnerabilities & Critical Needs
                     Text("กลุ่มเปราะบางและอาการวิกฤต (แตะเลือกตามจริง):")
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.secondary)
@@ -289,61 +427,10 @@ public struct DisasterBeaconMainView: View {
                 .background(Color.secondary.opacity(0.06))
                 .cornerRadius(12)
                 
-                // Group 5: Citizen IDs & Per-Person Details
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        sectionHeader(title: "5. รายชื่อและเลขบัตรประชาชน 13 หลัก", icon: "person.crop.rectangle.fill")
-                        Spacer()
-                        Text("(\(victims.count) คน)")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
-                    
-                    ForEach(victims) { victim in
-                        HStack(spacing: 8) {
-                            Image(systemName: victim.category.systemIcon)
-                                .foregroundColor(.blue)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(victim.fullName.isEmpty ? "ผู้ประสบภัย" : victim.fullName)
-                                    .font(.system(size: 13, weight: .semibold))
-                                if !victim.citizenID.isEmpty {
-                                    Text("เลข ปชช: \(victim.formattedCitizenID)")
-                                        .font(.system(size: 11, design: .monospaced))
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            Spacer()
-                            Button(action: { victims.removeAll { $0.id == victim.id } }) {
-                                Image(systemName: "trash")
-                                    .font(.system(size: 12))
-                                    .foregroundColor(.red)
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        .padding(8)
-                        .background(Color.secondary.opacity(0.08))
-                        .cornerRadius(6)
-                    }
-                    
-                    Button(action: { showAddPersonDialog = true }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "plus.circle.fill")
-                            Text("เพิ่มข้อมูลบุคคล / เลขบัตรประชาชน")
-                                .font(.system(size: 13, weight: .medium))
-                        }
-                        .foregroundColor(.blue)
-                        .padding(.vertical, 4)
-                    }
-                    .buttonStyle(.plain)
-                }
-                .padding()
-                .background(Color.secondary.opacity(0.06))
-                .cornerRadius(12)
-                
-                // Group 6: Additional Notes (Single Character-Limited Field)
+                // Group 5: Additional Notes (Single Character-Limited Field)
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
-                        Text("จุดสังเกตเพิ่มเติม (ข้อความเดียวสั้นกระชับ):")
+                        Text("5. จุดสังเกตเพิ่มเติม (ข้อความเดียวสั้นกระชับ):")
                             .font(.system(size: 12, weight: .bold))
                         Spacer()
                         Text("\(additionalNotes.count) / \(maxLandmarkLength) ตัวอักษร")
@@ -363,14 +450,14 @@ public struct DisasterBeaconMainView: View {
                 }
                 .padding()
                 
-                // Group 7: Mandatory GPS Acquisition (Battery-Conscious One-Shot Fix)
+                // Group 6: Mandatory GPS Acquisition (Battery-Conscious One-Shot Fix)
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         HStack(spacing: 6) {
                             Image(systemName: "location.north.circle.fill")
                                 .font(.system(size: 14, weight: .bold))
                                 .foregroundColor(gpsManager.hasValidGPSFix ? .green : .orange)
-                            Text("พิกัดดาวเทียม GPS (จำเป็นต้องมีเพื่อส่งกู้ภัย)")
+                            Text("6. พิกัดดาวเทียม GPS (จำเป็นต้องมีเพื่อส่งกู้ภัย)")
                                 .font(.system(size: 14, weight: .bold))
                         }
                         Spacer()
@@ -465,6 +552,16 @@ public struct DisasterBeaconMainView: View {
         }
         .sheet(isPresented: $showAddPersonDialog) {
             addPersonSheet
+        }
+        .alert("กรุณาระบุชื่อผู้แจ้งเหตุ", isPresented: $showNameRequiredAlert) {
+            Button("ตกลง", role: .cancel) {}
+        } message: {
+            Text("กรุณาระบุชื่อ-นามสกุลของผู้แจ้งเหตุหรือตัวแทนบ้านในช่องที่ 2 เพื่อให้เจ้าหน้าที่กู้ภัยสามารถติดต่อและเรียกชื่อได้ถูกต้อง")
+        }
+        .alert("กรุณาระบุที่อยู่บ้าน", isPresented: $showAddressRequiredAlert) {
+            Button("ตกลง", role: .cancel) {}
+        } message: {
+            Text("กรุณาระบุบ้านเลขที่หรือที่อยู่บ้านในช่องที่ 2 เพื่อให้เรือกู้ภัยและโดรนสามารถนำทางเข้าเทียบจุดช่วยเหลือได้ถูกต้อง")
         }
         .alert("จำเป็นต้องเปิด GPS", isPresented: $showGPSRequiredAlert) {
             Button("เปิดรับพิกัด GPS ทันที") {
@@ -829,6 +926,16 @@ public struct DisasterBeaconMainView: View {
     // MARK: - Actions
     
     private func broadcastEmergencyBeacon() {
+        let trimmedName = primaryVictimName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedName.isEmpty else {
+            showNameRequiredAlert = true
+            return
+        }
+        let trimmedAddress = houseAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedAddress.isEmpty else {
+            showAddressRequiredAlert = true
+            return
+        }
         guard gpsManager.hasValidGPSFix else {
             showGPSRequiredAlert = true
             return
