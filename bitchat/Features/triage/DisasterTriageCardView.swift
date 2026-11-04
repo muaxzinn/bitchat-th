@@ -18,6 +18,7 @@ import AppKit
 public struct DisasterTriageCardView: View {
     public let report: DisasterTriageReport
     public let officerLocation: (latitude: Double, longitude: Double)?
+    public let isSelfDevice: Bool
     
     @State private var isVictimsExpanded = true
     @State private var copiedCitizenID: String?
@@ -25,9 +26,14 @@ public struct DisasterTriageCardView: View {
     @State private var isAcknowledged = false
     @State private var showFullscreenBeacon = false
     
-    public init(report: DisasterTriageReport, officerLocation: (latitude: Double, longitude: Double)? = nil) {
+    public init(
+        report: DisasterTriageReport,
+        officerLocation: (latitude: Double, longitude: Double)? = nil,
+        isSelfDevice: Bool = false
+    ) {
         self.report = report
         self.officerLocation = officerLocation
+        self.isSelfDevice = isSelfDevice
     }
     
     private var urgencyColor: Color {
@@ -58,6 +64,20 @@ public struct DisasterTriageCardView: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundColor(urgencyColor)
                     .lineLimit(1)
+                
+                if isSelfDevice {
+                    HStack(spacing: 3) {
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.system(size: 10))
+                        Text("เครื่องนี้")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .foregroundColor(.green)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+                    .background(Color.green.opacity(0.15))
+                    .cornerRadius(4)
+                }
                 
                 Spacer()
                 

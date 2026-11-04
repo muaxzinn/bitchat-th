@@ -62,8 +62,21 @@ public struct DisasterBeaconMainView: View {
     
     public init() {}
     
+    /// Persistent unique beacon ID for this hardware device (asset identifier)
+    public static var deviceBeaconID: String {
+        let key = "bitchat.disaster.deviceBeaconID"
+        if let existing = UserDefaults.standard.string(forKey: key), !existing.isEmpty {
+            return existing
+        }
+        let newID = "NODE-" + UUID().uuidString.prefix(6).uppercased()
+        UserDefaults.standard.set(newID, forKey: key)
+        return newID
+    }
+    
     private var currentReport: DisasterTriageReport {
         var report = DisasterTriageReport(
+            id: Self.deviceBeaconID,
+            timestamp: Date(),
             floorPosition: floorPosition,
             waterLevel: waterLevel,
             waterTrend: waterTrend,
@@ -532,8 +545,12 @@ public struct DisasterBeaconMainView: View {
         let report: DisasterTriageReport
         let distanceMeters: Double?
         let isOutOfRange: Bool
+        let isSelf: Bool
         
-        var id: String { message.id }
+        var id: String {
+            if !report.id.isEmpty { return report.id }
+            return message.id
+        }
     }
     
     private var rescuerRadarView: some View {
@@ -545,11 +562,54 @@ public struct DisasterBeaconMainView: View {
             return nil
         }()
         
-        // Process each report with distance and range status
-        let allEntries: [RadarEntry] = messages.compactMap { msg in
-            guard let report = DisasterTriageCodec.decode(from: msg.content) else { return nil }
+        // 1. Group by Device / Household Identity and keep ONLY the latest report!
+        var latestReportsByDevice: [String: (message: BitchatMessage, report: DisasterTriageReport)] = [:]
+        
+        for msg in messages {
+            guard let report = DisasterTriageCodec.decode(from: msg.content) else { continue }
+            
+            let isSelf = conversationUIModel.isSelfSender(peerID: msg.senderPeerID, displayName: msg.sender)
+                || report.id == Self.deviceBeaconID
+            
+            // Unique identity key: All local broadcasts collapse into "SELF"
+            let deviceKey: String = {
+                if isSelf {
+                    return "SELF"
+                }
+                if let cid = report.victims.first(where: { !$0.citizenID.isEmpty })?.citizenID {
+                    return "CID:\(cid)"
+                }
+                if let peerID = msg.senderPeerID?.id, !peerID.isEmpty {
+                    return "PEER:\(peerID)"
+                }
+                if !report.id.isEmpty {
+                    return "RPT:\(report.id)"
+                }
+                if !msg.sender.isEmpty {
+                    return "SENDER:\(msg.sender)"
+                }
+                return "MSG:\(msg.id)"
+            }()
+            
+            if let existing = latestReportsByDevice[deviceKey] {
+                let existingTime = max(existing.report.timestamp, existing.message.timestamp)
+                let newTime = max(report.timestamp, msg.timestamp)
+                if newTime >= existingTime {
+                    latestReportsByDevice[deviceKey] = (msg, report)
+                }
+            } else {
+                latestReportsByDevice[deviceKey] = (msg, report)
+            }
+        }
+        
+        // 2. Process unique deduplicated devices
+        let allEntries: [RadarEntry] = latestReportsByDevice.values.map { pair in
+            let msg = pair.message
+            let report = pair.report
             var dist: Double? = nil
             var outOfRange = false
+            let isSelf = conversationUIModel.isSelfSender(peerID: msg.senderPeerID, displayName: msg.sender)
+                || report.id == Self.deviceBeaconID
             
             if let off = officerLoc, let rLat = report.latitude, let rLon = report.longitude {
                 let d = DisasterDistanceCalculator.distanceInMeters(from: off, to: (rLat, rLon))
@@ -562,7 +622,13 @@ public struct DisasterBeaconMainView: View {
                 outOfRange = true
             }
             
-            return RadarEntry(message: msg, report: report, distanceMeters: dist, isOutOfRange: outOfRange)
+            return RadarEntry(
+                message: msg,
+                report: report,
+                distanceMeters: dist,
+                isOutOfRange: outOfRange,
+                isSelf: isSelf
+            )
         }
         
         let totalCount = allEntries.count
@@ -702,7 +768,8 @@ public struct DisasterBeaconMainView: View {
                         ForEach(displayEntries) { entry in
                             DisasterTriageCardView(
                                 report: entry.report,
-                                officerLocation: officerLoc
+                                officerLocation: officerLoc,
+                                isSelfDevice: entry.isSelf
                             )
                             .padding(.horizontal, 12)
                         }

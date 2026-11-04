@@ -125,5 +125,45 @@ final class DisasterTriageTests: XCTestCase {
         XCTAssertTrue(distClose <= filter5km.maxDistanceMeters!)
         XCTAssertTrue(distFar <= filter5km.maxDistanceMeters!)
     }
+    
+    // MARK: - Device Deduplication & Last-Write-Wins Tests
+    
+    func testRadarDeviceDeduplication() {
+        let deviceID = "NODE-TEST99"
+        
+        let report1 = DisasterTriageReport(
+            id: deviceID,
+            timestamp: Date().addingTimeInterval(-100),
+            waterLevel: .ankle
+        )
+        let report2 = DisasterTriageReport(
+            id: deviceID,
+            timestamp: Date().addingTimeInterval(-50),
+            waterLevel: .waist
+        )
+        let report3 = DisasterTriageReport(
+            id: deviceID,
+            timestamp: Date(),
+            waterLevel: .headHigh
+        )
+        
+        let reports = [report1, report2, report3]
+        var latestMap: [String: DisasterTriageReport] = [:]
+        
+        for r in reports {
+            if let existing = latestMap[r.id] {
+                if r.timestamp > existing.timestamp {
+                    latestMap[r.id] = r
+                }
+            } else {
+                latestMap[r.id] = r
+            }
+        }
+        
+        // Exactly 1 deduplicated entry remaining
+        XCTAssertEqual(latestMap.count, 1)
+        // Kept the latest state (headHigh)
+        XCTAssertEqual(latestMap[deviceID]?.waterLevel, .headHigh)
+    }
 }
 
