@@ -2,8 +2,9 @@
 // DisasterTriageCodec.swift
 // bitchat
 //
-// Dual-mode serialization: produces human-readable Thai emergency broadcast
-// while embedding a structured Base64 payload for rich native card decoding.
+// Pure compact code serialization for offline emergency radio & BLE mesh broadcasts.
+// Transmits zero verbose human sentences over the air to save critical radio bandwidth
+// while encoding the Universal Shortcode and structured Base64 payload.
 //
 // This is free and unencumbered software released into the public domain.
 //
@@ -15,41 +16,25 @@ public enum DisasterTriageCodec {
     
     // MARK: - Encode
     
-    /// Encodes a DisasterTriageReport into a dual-mode message string:
-    /// Line 1: Human-readable emergency announcement with Universal Shortcode
-    /// Line 2: Structured Base64 payload for machine parsing
+    /// Encodes a DisasterTriageReport into a pure code-only wire format:
+    /// "SOS#<ShortCode>#TH-SOS-V1:<Base64Payload>"
+    /// No long descriptive Thai text is transmitted over the air, minimizing BLE airtime & radio collision.
     public static func encode(_ report: DisasterTriageReport) -> String {
         let shortcode = report.universalShortCode
-        let location = report.floorPosition.thaiTitle
-        let water = report.waterLevel.thaiTitle
-        let summary = report.victimSummaryDescription
-        let supplies = report.supplies.map { $0.thaiTitle }.joined(separator: ", ")
-        
-        var header = "🚨 [รหัสฉุกเฉิน: \(shortcode)]\n"
-        if let lat = report.latitude, let lon = report.longitude {
-            header += String(format: "🌐 พิกัด GPS: %.5f, %.5f\n", lat, lon)
-        }
-        header += "📍 ตำแหน่ง: \(location) | น้ำ: \(water)\n"
-        header += "👥 ผู้ประสบภัย: \(summary)\n"
-        if !supplies.isEmpty {
-            header += "📦 ต้องการด่วน: \(supplies)\n"
-        }
-        if !report.additionalNotes.isEmpty {
-            header += "📝 เพิ่มเติม: \(report.additionalNotes)\n"
-        }
-        
         let jsonEncoder = JSONEncoder()
         jsonEncoder.dateEncodingStrategy = .iso8601
+        
         if let data = try? jsonEncoder.encode(report) {
             let base64 = data.base64EncodedString()
-            return "\(header)\n\(payloadPrefix)\(base64)"
+            return "SOS#\(shortcode)#\(payloadPrefix)\(base64)"
         }
-        return header
+        return "SOS#\(shortcode)"
     }
     
     // MARK: - Decode
     
     /// Parses a raw message string and extracts DisasterTriageReport if present.
+    /// Fully backward-compatible with pure code packets and legacy text blocks.
     public static func decode(from text: String) -> DisasterTriageReport? {
         guard let range = text.range(of: payloadPrefix) else { return nil }
         let payloadSub = text[range.upperBound...].trimmingCharacters(in: .whitespacesAndNewlines)

@@ -17,6 +17,7 @@ import AppKit
 
 public struct DisasterTriageCardView: View {
     public let report: DisasterTriageReport
+    public let officerLocation: (latitude: Double, longitude: Double)?
     
     @State private var isVictimsExpanded = true
     @State private var copiedCitizenID: String?
@@ -24,8 +25,9 @@ public struct DisasterTriageCardView: View {
     @State private var isAcknowledged = false
     @State private var showFullscreenBeacon = false
     
-    public init(report: DisasterTriageReport) {
+    public init(report: DisasterTriageReport, officerLocation: (latitude: Double, longitude: Double)? = nil) {
         self.report = report
+        self.officerLocation = officerLocation
     }
     
     private var urgencyColor: Color {
@@ -107,78 +109,108 @@ public struct DisasterTriageCardView: View {
                 .cornerRadius(6)
             }
             
-            // GPS Satellite Coordinates
+            // GPS Satellite Coordinates & Officer Relative Vector
             if let lat = report.latitude, let lon = report.longitude {
-                HStack(spacing: 8) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "location.north.circle.fill")
-                            .font(.system(size: 11))
-                        Text(String(format: "GPS: %.5f, %.5f", lat, lon))
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                VStack(alignment: .leading, spacing: 6) {
+                    if let officerLoc = officerLocation {
+                        let vector = DisasterDistanceCalculator.calculateVector(from: officerLoc, to: (lat, lon))
+                        HStack(spacing: 6) {
+                            Image(systemName: vector.arrowIcon)
+                                .font(.system(size: 11, weight: .bold))
+                            Text("ห่างจากเจ้าหน้าที่ \(vector.formattedDistance) (\(vector.cardinalDirection))")
+                                .font(.system(size: 12, weight: .bold))
+                        }
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.blue)
+                        .cornerRadius(6)
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(Color.green.opacity(0.15))
-                    .foregroundColor(.green)
-                    .cornerRadius(6)
                     
-                    Button(action: {
-                        let coordStr = String(format: "%.5f, %.5f", lat, lon)
-                        copyToClipboard(coordStr)
-                    }) {
-                        HStack(spacing: 2) {
-                            Image(systemName: "doc.on.doc")
-                                .font(.system(size: 9))
-                            Text("คัดลอกพิกัด")
-                                .font(.system(size: 10, weight: .medium))
+                    HStack(spacing: 8) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "location.north.circle.fill")
+                                .font(.system(size: 11))
+                            Text(String(format: "GPS: %.5f, %.5f", lat, lon))
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                         }
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.secondary.opacity(0.12))
-                        .cornerRadius(4)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.green.opacity(0.15))
+                        .foregroundColor(.green)
+                        .cornerRadius(6)
+                        
+                        Button(action: {
+                            let coordStr = String(format: "%.5f, %.5f", lat, lon)
+                            copyToClipboard(coordStr)
+                        }) {
+                            HStack(spacing: 2) {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 9))
+                                Text("คัดลอกพิกัด")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.secondary.opacity(0.12))
+                            .cornerRadius(4)
+                        }
+                        .buttonStyle(.plain)
+                        
+                        #if os(macOS)
+                        Button(action: {
+                            if let url = URL(string: "https://maps.apple.com/?q=\(lat),\(lon)") {
+                                NSWorkspace.shared.open(url)
+                            }
+                        }) {
+                            HStack(spacing: 2) {
+                                Image(systemName: "map.fill")
+                                    .font(.system(size: 9))
+                                Text("เปิดแผนที่")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.blue.opacity(0.12))
+                            .cornerRadius(4)
+                        }
+                        .buttonStyle(.plain)
+                        #elseif os(iOS)
+                        Button(action: {
+                            if let url = URL(string: "https://maps.apple.com/?q=\(lat),\(lon)") {
+                                UIApplication.shared.open(url)
+                            }
+                        }) {
+                            HStack(spacing: 2) {
+                                Image(systemName: "map.fill")
+                                    .font(.system(size: 9))
+                                Text("เปิดแผนที่")
+                                    .font(.system(size: 10, weight: .medium))
+                            }
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.blue.opacity(0.12))
+                            .cornerRadius(4)
+                        }
+                        .buttonStyle(.plain)
+                        #endif
                     }
-                    .buttonStyle(.plain)
-                    
-                    #if os(macOS)
-                    Button(action: {
-                        if let url = URL(string: "https://maps.apple.com/?q=\(lat),\(lon)") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }) {
-                        HStack(spacing: 2) {
-                            Image(systemName: "map.fill")
-                                .font(.system(size: 9))
-                            Text("เปิดแผนที่")
-                                .font(.system(size: 10, weight: .medium))
-                        }
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.blue.opacity(0.12))
-                        .cornerRadius(4)
-                    }
-                    .buttonStyle(.plain)
-                    #elseif os(iOS)
-                    Button(action: {
-                        if let url = URL(string: "https://maps.apple.com/?q=\(lat),\(lon)") {
-                            UIApplication.shared.open(url)
-                        }
-                    }) {
-                        HStack(spacing: 2) {
-                            Image(systemName: "map.fill")
-                                .font(.system(size: 9))
-                            Text("เปิดแผนที่")
-                                .font(.system(size: 10, weight: .medium))
-                        }
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 3)
-                        .background(Color.blue.opacity(0.12))
-                        .cornerRadius(4)
-                    }
-                    .buttonStyle(.plain)
-                    #endif
                 }
+            } else if officerLocation != nil {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                        .foregroundColor(.orange)
+                    Text("ไม่มีพิกัดดาวเทียม (ไม่สามารถคำนวณระยะทางและคัดกรองพื้นที่ได้)")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.orange)
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.orange.opacity(0.12))
+                .cornerRadius(6)
             }
             
             // Needed Supplies Chips

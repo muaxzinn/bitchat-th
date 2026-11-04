@@ -53,7 +53,10 @@ final class DisasterTriageTests: XCTestCase {
         
         let encodedWire = DisasterTriageCodec.encode(originalReport)
         XCTAssertTrue(DisasterTriageCodec.isDisasterReport(encodedWire))
-        XCTAssertTrue(encodedWire.contains("🚨 [รหัสฉุกเฉิน: SOS-FRW6-RED-P2M]"))
+        // Verify pure compact code wire format (Zero verbose sentences)
+        XCTAssertTrue(encodedWire.hasPrefix("SOS#SOS-FRW6-RED-P2M#TH-SOS-V1:"))
+        XCTAssertFalse(encodedWire.contains("📍 ตำแหน่ง:"))
+        XCTAssertFalse(encodedWire.contains("👥 ผู้ประสบภัย:"))
         
         guard let decodedReport = DisasterTriageCodec.decode(from: encodedWire) else {
             XCTFail("Failed to decode disaster triage report from wire text")
@@ -84,6 +87,43 @@ final class DisasterTriageTests: XCTestCase {
         
         // F2 + W3 + RED (Score 7.0) + P2 + CE (Child & Elderly)
         XCTAssertEqual(report.universalShortCode, "SOS-F2W3-RED-P2CE")
+    }
+    
+    // MARK: - Distance Calculation & Officer Filtering Tests
+    
+    func testDistanceCalculatorAndBearing() {
+        // Officer located at Lat: 5.84261, Lon: 101.87717
+        let officer = (latitude: 5.84261, longitude: 101.87717)
+        // Victim located approx ~550 meters directly north (higher latitude)
+        let victimNorth = (latitude: 5.84761, longitude: 101.87717)
+        
+        let dist = DisasterDistanceCalculator.distanceInMeters(from: officer, to: victimNorth)
+        XCTAssertGreaterThan(dist, 500)
+        XCTAssertLessThan(dist, 600)
+        
+        let vector = DisasterDistanceCalculator.calculateVector(from: officer, to: victimNorth)
+        XCTAssertEqual(vector.cardinalDirection, "ทิศเหนือ")
+        XCTAssertEqual(vector.arrowIcon, "arrow.up")
+        XCTAssertEqual(vector.formattedDistance, String(format: "%.0f ม.", dist))
+    }
+    
+    func testOfficerRangeFilterEvaluation() {
+        let officer = (latitude: 5.84261, longitude: 101.87717)
+        let victimClose = (latitude: 5.84461, longitude: 101.87717) // ~220m
+        let victimFar = (latitude: 5.87261, longitude: 101.87717) // ~3.3km
+        
+        let distClose = DisasterDistanceCalculator.distanceInMeters(from: officer, to: victimClose)
+        let distFar = DisasterDistanceCalculator.distanceInMeters(from: officer, to: victimFar)
+        
+        // Filter: 500 meters
+        let filter500 = OfficerRangeFilter.within500m
+        XCTAssertTrue(distClose <= filter500.maxDistanceMeters!)
+        XCTAssertFalse(distFar <= filter500.maxDistanceMeters!)
+        
+        // Filter: 5 kilometers
+        let filter5km = OfficerRangeFilter.within5km
+        XCTAssertTrue(distClose <= filter5km.maxDistanceMeters!)
+        XCTAssertTrue(distFar <= filter5km.maxDistanceMeters!)
     }
 }
 

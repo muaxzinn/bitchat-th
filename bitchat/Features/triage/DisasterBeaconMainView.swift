@@ -41,6 +41,12 @@ public struct DisasterBeaconMainView: View {
     @State private var primaryRequest: PrimaryRescueRequest = .boatEvac
     @State private var victims: [VictimRecord] = []
     @State private var additionalNotes: String = ""
+    private let maxLandmarkLength = 40
+    
+    // Officer Radar Filters
+    @State private var officerRangeFilter: OfficerRangeFilter = .all
+    @State private var officerSortOrder: OfficerSortOrder = .urgencyFirst
+    @State private var hideOutOfArea: Bool = false
     
     // Add Person Form State
     @State private var showAddPersonDialog = false
@@ -321,12 +327,26 @@ public struct DisasterBeaconMainView: View {
                 .background(Color.secondary.opacity(0.06))
                 .cornerRadius(12)
                 
-                // Group 6: Additional Notes
+                // Group 6: Additional Notes (Single Character-Limited Field)
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("จุดสังเกตเพิ่มเติม:")
-                        .font(.system(size: 12, weight: .bold))
-                    TextField("เช่น บ้านทาสีชมพู หลังคาปั้นหยา มีเสาอากาศ", text: $additionalNotes)
+                    HStack {
+                        Text("จุดสังเกตเพิ่มเติม (ข้อความเดียวสั้นกระชับ):")
+                            .font(.system(size: 12, weight: .bold))
+                        Spacer()
+                        Text("\(additionalNotes.count) / \(maxLandmarkLength) ตัวอักษร")
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(additionalNotes.count >= maxLandmarkLength ? .red : (additionalNotes.count >= 30 ? .orange : .secondary))
+                    }
+                    TextField("เช่น บ้านสีชมพู หลังคาปั้นหยา หน้าปากซอย", text: $additionalNotes)
                         .textFieldStyle(.roundedBorder)
+                        .onChange(of: additionalNotes) { newValue in
+                            if newValue.count > maxLandmarkLength {
+                                additionalNotes = String(newValue.prefix(maxLandmarkLength))
+                            }
+                        }
+                    Text("จำกัดไม่เกิน \(maxLandmarkLength) ตัวอักษรเพื่อประหยัดคลื่นวิทยุฉุกเฉิน (ระบุสีบ้านหรือสัญลักษณ์เด่น)")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
                 }
                 .padding()
                 
@@ -507,39 +527,169 @@ public struct DisasterBeaconMainView: View {
     
     // MARK: - Tab 1: Rescuer Radar View
     
+    private struct RadarEntry: Identifiable {
+        let message: BitchatMessage
+        let report: DisasterTriageReport
+        let distanceMeters: Double?
+        let isOutOfRange: Bool
+        
+        var id: String { message.id }
+    }
+    
     private var rescuerRadarView: some View {
         let messages = publicChatModel.messages
-        let reports = messages.compactMap { msg -> (BitchatMessage, DisasterTriageReport)? in
-            if let report = DisasterTriageCodec.decode(from: msg.content) {
-                return (msg, report)
+        let officerLoc: (latitude: Double, longitude: Double)? = {
+            if let lat = gpsManager.latitude, let lon = gpsManager.longitude {
+                return (lat, lon)
             }
             return nil
+        }()
+        
+        // Process each report with distance and range status
+        let allEntries: [RadarEntry] = messages.compactMap { msg in
+            guard let report = DisasterTriageCodec.decode(from: msg.content) else { return nil }
+            var dist: Double? = nil
+            var outOfRange = false
+            
+            if let off = officerLoc, let rLat = report.latitude, let rLon = report.longitude {
+                let d = DisasterDistanceCalculator.distanceInMeters(from: off, to: (rLat, rLon))
+                dist = d
+                if let maxD = officerRangeFilter.maxDistanceMeters {
+                    outOfRange = (d > maxD)
+                }
+            } else if officerRangeFilter.maxDistanceMeters != nil {
+                // If filtering by distance but victim has no GPS, mark as out of range
+                outOfRange = true
+            }
+            
+            return RadarEntry(message: msg, report: report, distanceMeters: dist, isOutOfRange: outOfRange)
         }
-        .sorted { $0.1.calculatedTriageScore > $1.1.calculatedTriageScore }
+        
+        let totalCount = allEntries.count
+        let inRangeCount = allEntries.filter { !$0.isOutOfRange }.count
+        let outRangeCount = totalCount - inRangeCount
+        
+        let displayEntries = allEntries.filter { entry in
+            if hideOutOfArea && entry.isOutOfRange { return false }
+            return true
+        }
+        .sorted { a, b in
+            if officerSortOrder == .nearestFirst {
+                switch (a.distanceMeters, b.distanceMeters) {
+                case let (d1?, d2?):
+                    return d1 < d2
+                case (.some, .none):
+                    return true
+                case (.none, .some):
+                    return false
+                case (.none, .none):
+                    return a.report.calculatedTriageScore > b.report.calculatedTriageScore
+                }
+            } else {
+                // Urgency First
+                if a.report.calculatedTriageScore != b.report.calculatedTriageScore {
+                    return a.report.calculatedTriageScore > b.report.calculatedTriageScore
+                }
+                let d1 = a.distanceMeters ?? Double.infinity
+                let d2 = b.distanceMeters ?? Double.infinity
+                return d1 < d2
+            }
+        }
         
         return VStack(spacing: 0) {
-            HStack {
-                Text("เรดาร์ตรวจจับสัญญาณผู้ประสบภัยในรัศมี BLE")
-                    .font(.system(size: 13, weight: .semibold))
-                Spacer()
-                Text("พบ \(reports.count) จุด")
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.blue)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(Color.secondary.opacity(0.06))
+            // 1. Officer GPS Control Strip
+            officerGPSStrip
             
-            if reports.isEmpty {
+            Divider()
+            
+            // 2. Range Filter & Sort Controls
+            VStack(spacing: 8) {
+                // Distance Range Filter Chips
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text("ระยะตรวจการณ์ (คัดกรองพื้นที่):")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        if officerRangeFilter != .all {
+                            Text("ในระยะ: \(inRangeCount) | นอกพื้นที่: \(outRangeCount)")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.blue)
+                        }
+                    }
+                    
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(OfficerRangeFilter.allCases) { filter in
+                                let isSelected = (officerRangeFilter == filter)
+                                Button(action: {
+                                    officerRangeFilter = filter
+                                    if filter != .all {
+                                        hideOutOfArea = true
+                                    } else {
+                                        hideOutOfArea = false
+                                    }
+                                }) {
+                                    Text(filter.thaiTitle)
+                                        .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 5)
+                                        .background(isSelected ? Color.blue : Color.secondary.opacity(0.1))
+                                        .foregroundColor(isSelected ? .white : .primary)
+                                        .cornerRadius(6)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                
+                // Sorting & Out-of-Area Toggle Row
+                HStack {
+                    HStack(spacing: 4) {
+                        Text("เรียงตาม:")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        
+                        Picker("", selection: $officerSortOrder) {
+                            ForEach(OfficerSortOrder.allCases) { order in
+                                Text(order.thaiTitle).tag(order)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(maxWidth: 240)
+                    }
+                    
+                    Spacer()
+                    
+                    if officerRangeFilter != .all {
+                        Toggle(isOn: $hideOutOfArea) {
+                            Text("ซ่อนนอกพื้นที่")
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(.secondary)
+                        }
+                        .toggleStyle(.switch)
+                        .scaleEffect(0.8)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color.secondary.opacity(0.04))
+            
+            Divider()
+            
+            // 3. Reports List or Empty Scan State
+            if displayEntries.isEmpty {
                 VStack(spacing: 12) {
                     Spacer()
                     Image(systemName: "dot.radiowaves.left.and.right")
                         .font(.system(size: 40))
                         .foregroundColor(.secondary.opacity(0.5))
-                    Text("กำลังสแกนค้นหาสัญญาณ Beacon ในอากาศ...")
+                    Text(totalCount > 0 ? "ไม่มีผู้ประสบภัยในระยะที่เลือก" : "กำลังสแกนค้นหาสัญญาณ Beacon ในอากาศ...")
                         .font(.system(size: 14, weight: .medium))
                         .foregroundColor(.secondary)
-                    Text("เมื่อเรือกู้ภัยเข้าใกล้บ้านที่มีการส่ง SOS ข้อมูลจะเด้งขึ้นมาทันที")
+                    Text(totalCount > 0 ? "มีผู้ประสบภัย \(totalCount) จุด แต่นอกระยะ \(officerRangeFilter.thaiTitle) กรุณาขยายระยะหรือเลือก 'ทั้งหมด'" : "เมื่อเรือกู้ภัยเข้าใกล้บ้านที่มีการส่ง SOS ข้อมูลจะเด้งขึ้นมาทันที")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary.opacity(0.8))
                         .multilineTextAlignment(.center)
@@ -549,16 +699,64 @@ public struct DisasterBeaconMainView: View {
             } else {
                 ScrollView {
                     LazyVStack(spacing: 12) {
-                        ForEach(reports, id: \.0.id) { pair in
-                            let report = pair.1
-                            DisasterTriageCardView(report: report)
-                                .padding(.horizontal, 12)
+                        ForEach(displayEntries) { entry in
+                            DisasterTriageCardView(
+                                report: entry.report,
+                                officerLocation: officerLoc
+                            )
+                            .padding(.horizontal, 12)
                         }
                     }
                     .padding(.vertical, 12)
                 }
             }
         }
+    }
+    
+    private var officerGPSStrip: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "ferry.fill")
+                .foregroundColor(.blue)
+                .font(.system(size: 14))
+            
+            if let lat = gpsManager.latitude, let lon = gpsManager.longitude {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("พิกัดเรือกู้ภัย / จุดตรวจการณ์:")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(.secondary)
+                    Text(String(format: "%.5f, %.5f (±%.0f ม.)", lat, lon, gpsManager.accuracyMeters ?? 0))
+                        .font(.system(size: 11, weight: .bold, design: .monospaced))
+                        .foregroundColor(.primary)
+                }
+            } else {
+                Text("ยังไม่มีพิกัดเรือกู้ภัย (เปิดเพื่อคำนวณระยะทาง)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.orange)
+            }
+            
+            Spacer()
+            
+            Button(action: {
+                gpsManager.requestTemporaryGPSFix()
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 10))
+                    Text(gpsManager.hasValidGPSFix ? "อัปเดตพิกัดเรือ" : "กดเปิด GPS เรือ")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(6)
+            }
+            .buttonStyle(.plain)
+            .disabled(gpsManager.isLocating)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.blue.opacity(0.06))
     }
     
     // MARK: - Actions
