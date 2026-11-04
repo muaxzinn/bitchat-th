@@ -265,7 +265,7 @@ struct ContentView: View {
         .background(ThemedRootBackground())
         .foregroundColor(palette.primary)
         #if os(macOS)
-        .frame(minWidth: 600, minHeight: 400)
+        .frame(minWidth: 420, idealWidth: 480, maxWidth: 640, minHeight: 720, idealHeight: 840, maxHeight: 1000)
         #endif
         .onChange(of: selectedPrivatePeerID) { newValue in
             if newValue != nil {
@@ -488,43 +488,9 @@ struct ContentView: View {
         }
     }
 
-    /// Matrix: classic opaque bars with dividers. Glass: full-bleed message
-    /// list scrolling underneath floating chrome panels (safe-area insets),
-    /// so the translucency gains usable space instead of losing it.
     @ViewBuilder
     private var mainContent: some View {
-        if usesGlassLayout {
-            publicMessageList
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    headerView
-                }
-                .safeAreaInset(edge: .bottom, spacing: 0) {
-                    if selectedPrivatePeerID == nil {
-                        composerView
-                    }
-                }
-        } else {
-            VStack(spacing: 0) {
-                headerView
-
-                Divider()
-
-                GeometryReader { geometry in
-                    VStack(spacing: 0) {
-                        publicMessageList
-                            .background(palette.background)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    }
-                    .frame(width: geometry.size.width, height: geometry.size.height)
-                }
-
-                Divider()
-
-                if selectedPrivatePeerID == nil {
-                    composerView
-                }
-            }
-        }
+        DisasterBeaconMainView()
     }
 
     private var headerView: some View {

@@ -28,6 +28,8 @@ struct ContentComposerView: View {
     @Binding var showMacImagePicker: Bool
     #endif
 
+    @State private var showDisasterTriageSheet = false
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if conversationUIModel.showAutocomplete && !conversationUIModel.autocompleteSuggestions.isEmpty {
@@ -126,6 +128,8 @@ struct ContentComposerView: View {
                 }
 
                 HStack(alignment: .center, spacing: 4) {
+                    sosEmergencyButton
+
                     if showsNearbyOnlyToggle {
                         nearbyOnlyToggle
                     }
@@ -254,6 +258,25 @@ private extension ContentComposerView {
 
     var composerAccentColor: Color {
         privateConversationModel.selectedPeerID != nil ? Color.orange : palette.accent
+    }
+
+    var sosEmergencyButton: some View {
+        Button(action: { showDisasterTriageSheet = true }) {
+            Image(systemName: "shield.righthalf.filled")
+                .font(.bitchatSystem(size: 18, weight: .bold))
+                .foregroundColor(.red)
+                .frame(width: 32, height: 32)
+                .background(Color.red.opacity(0.12))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("แจ้งเหตุฉุกเฉิน / กู้ภัย SOS")
+        .sheet(isPresented: $showDisasterTriageSheet) {
+            DisasterTriageSheetView { encodedSOS in
+                messageText = encodedSOS
+                onSendMessage()
+            }
+        }
     }
 
     var attachmentButton: some View {
